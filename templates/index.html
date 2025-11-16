@@ -6,141 +6,429 @@
     <title>Акустическая диагностика</title>
     <style>
         body { font-family: Arial; margin: 20px; background: #f0f0f0; }
-        .container { max-width: 1000px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; }
         .upload-section { border: 2px dashed #ccc; padding: 40px; text-align: center; margin: 20px 0; }
         .upload-btn { background: #007cba; color: white; border: none; padding: 12px 24px; border-radius: 5px; cursor: pointer; margin: 10px; }
         .upload-btn:disabled { background: #ccc; }
+        .upload-btn.secondary { background: #6c757d; }
+        .upload-btn.stream { background: #28a745; }
+        .upload-btn.download { background: #ffc107; color: black; }
         .results { margin-top: 20px; }
         .result-card { border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 5px; }
-        .spectrogram-img { width: 100%; min-height: 200px; background: #f8f8f8; display: flex; align-items: center; justify-content: center; margin: 10px 0; }
-        .spectrogram-img img { max-width: 100%; max-height: 300px; }
+        .spectrogram-img { width: 100%; background: #f8f8f8; display: flex; align-items: center; justify-content: center; margin: 10px 0; }
+        .spectrogram-img img { max-width: 100%; height: auto; }
         .audio-player { width: 100%; margin: 10px 0; }
         .download-btn { background: #28a745; color: white; padding: 8px 15px; border-radius: 3px; text-decoration: none; margin: 5px; display: inline-block; }
         .error { background: #dc3545; color: white; padding: 15px; border-radius: 5px; margin: 10px 0; }
         .success { background: #28a745; color: white; padding: 15px; border-radius: 5px; margin: 10px 0; }
+        .file-list { max-height: 300px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; margin: 10px 0; }
+        .file-item { padding: 5px; border-bottom: 1px solid #eee; }
+        .progress-bar { width: 100%; height: 20px; background: #f0f0f0; border-radius: 10px; margin: 10px 0; overflow: hidden; }
+        .progress-fill { height: 100%; background: #007cba; transition: width 0.3s; }
+        .batch-summary { background: #e9ecef; padding: 15px; border-radius: 5px; margin: 10px 0; }
+        .file-section { border: 2px solid #007cba; border-radius: 10px; padding: 15px; margin: 20px 0; background: #f8f9fa; }
+        .info-box { background: #d1ecf1; padding: 10px; border-radius: 5px; margin: 10px 0; }
+        .download-buttons { background: #fff3cd; padding: 15px; border-radius: 5px; margin: 15px 0; border: 2px solid #ffc107; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>🔊 Акустическая диагностика</h1>
         
+        <div class="info-box">
+            <strong>💡 Рекомендация:</strong> Для большого количества файлов используйте <strong>потоковую загрузку</strong>!
+        </div>
+        
         <div class="upload-section" id="uploadSection">
-            <h2>Загрузите аудиофайл</h2>
-            <input type="file" id="fileInput" style="display: none;" accept=".wav,.mp3,.flac,.m4a,.aac">
+            <h2>Загрузите аудиофайлы</h2>
+            <input type="file" id="fileInput" style="display: none;" accept=".wav,.mp3,.flac,.m4a,.aac" multiple>
             <button class="upload-btn" onclick="document.getElementById('fileInput').click()">
-                Выбрать файл
+                Выбрать файлы
             </button>
-            <p>WAV, MP3, FLAC, M4A, AAC (до 16MB)</p>
+            <button class="upload-btn secondary" onclick="clearFiles()">
+                Очистить
+            </button>
+            <p>WAV, MP3, FLAC, M4A, AAC</p>
+            <div class="file-list" id="fileList" style="display: none;">
+                <h4>Выбранные файлы: <span id="fileCount">0</span></h4>
+                <div id="fileItems"></div>
+            </div>
         </div>
 
         <div>
             <strong>Уровень шумоподавления: <span id="noiseLevelValue">80%</span></strong>
             <input type="range" min="0" max="100" value="80" style="width: 100%" id="noiseLevel">
-            <button class="upload-btn" onclick="processFile()" id="processBtn" disabled>
-                Обработать звук
-            </button>
+            
+            <div style="margin-top: 15px; display: flex; gap: 10px; flex-wrap: wrap;">
+                <button class="upload-btn" onclick="processFilesSimple()" id="simpleBtn" disabled>
+                    Быстрая загрузка (до 5 файлов)
+                </button>
+                <button class="upload-btn stream" onclick="startStreamingUpload()" id="streamBtn" disabled>
+                    📦 Потоковая загрузка (любое количество)
+                </button>
+            </div>
         </div>
 
         <div id="loading" style="display: none; text-align: center;">
-            <h3>Обработка...</h3>
+            <h3>Обработка файлов...</h3>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+            </div>
+            <div id="progressText">Подготовка...</div>
+            <div id="chunkInfo" style="margin-top: 10px;"></div>
         </div>
 
         <div class="error" id="error" style="display: none;"></div>
         <div class="success" id="success" style="display: none;"></div>
 
+        <div class="batch-summary" id="batchSummary" style="display: none;">
+            <h3>Сводка обработки</h3>
+            <div id="summaryContent"></div>
+            
+            <!-- КНОПКИ СКАЧИВАНИЯ СПЕКТРОГРАММ -->
+            <div class="download-buttons" id="downloadButtons" style="display: none;">
+                <h4>📥 Скачать все спектрограммы архивом:</h4>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <button class="upload-btn download" onclick="downloadSpectrograms('original')">
+                        📊 Скачать исходные спектрограммы
+                    </button>
+                    <button class="upload-btn download" onclick="downloadSpectrograms('denoised')">
+                        🔧 Скачать обработанные спектрограммы
+                    </button>
+                    <button class="upload-btn download" onclick="downloadSpectrograms('residual')">
+                        🎵 Скачать спектрограммы шумов
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <div class="results" id="results" style="display: none;">
-            <h2>Результаты:</h2>
-            <div id="fileInfo" style="background: #eee; padding: 10px; margin: 10px 0;"></div>
+            <h2>Результаты (все спектрограммы созданы!):</h2>
             <div id="resultsGrid"></div>
         </div>
     </div>
 
     <script>
-        let currentFile = null;
+        let currentFiles = [];
+        let currentSessionId = null;
+        let isProcessing = false;
 
         document.getElementById('fileInput').addEventListener('change', function(e) {
-            if (e.target.files.length) handleFile(e.target.files[0]);
+            if (e.target.files.length) handleFiles(e.target.files);
         });
 
         document.getElementById('noiseLevel').addEventListener('input', function() {
             document.getElementById('noiseLevelValue').textContent = this.value + '%';
         });
 
-        function handleFile(file) {
-            if (!file.type.match('audio.*')) {
-                showError('Выберите аудиофайл!');
+        function handleFiles(files) {
+            currentFiles = Array.from(files).filter(file => {
+                const isAudio = file.type.match('audio.*') || 
+                               file.name.toLowerCase().match(/\.(wav|mp3|flac|m4a|aac)$/);
+                return isAudio;
+            });
+            
+            if (currentFiles.length === 0) {
+                showError('Выберите аудиофайлы!');
                 return;
             }
-            currentFile = file;
-            document.getElementById('fileInfo').textContent = `Файл: ${file.name} (${(file.size/1024/1024).toFixed(1)} MB)`;
-            document.getElementById('processBtn').disabled = false;
-            showSuccess('Файл готов к обработке');
-        }
 
-        async function processFile() {
-            if (!currentFile) return;
+            updateFileList();
+            updateButtons();
             
-            showLoading(true);
-            const formData = new FormData();
-            formData.append('file', currentFile);
-            formData.append('noise_level', document.getElementById('noiseLevel').value / 100);
-
-            try {
-                const response = await fetch('/upload', { method: 'POST', body: formData });
-                const data = await response.json();
-                
-                if (!response.ok) throw new Error(data.error);
-                displayResults(data);
-                showSuccess('Обработка завершена!');
-            } catch (err) {
-                showError(err.message);
-            } finally {
-                showLoading(false);
+            const totalSize = currentFiles.reduce((sum, file) => sum + file.size, 0);
+            showSuccess(`✅ Выбрано ${currentFiles.length} файлов (${(totalSize/1024/1024).toFixed(1)} MB)`);
+            
+            if (currentFiles.length > 5) {
+                showSuccess('💡 Рекомендуется использовать потоковую загрузку для большого количества файлов!');
             }
         }
 
-        function displayResults(data) {
+        function updateFileList() {
+            const fileItems = document.getElementById('fileItems');
+            const fileList = document.getElementById('fileList');
+            const fileCount = document.getElementById('fileCount');
+            
+            fileItems.innerHTML = '';
+            currentFiles.forEach((file, index) => {
+                const fileItem = document.createElement('div');
+                fileItem.className = 'file-item';
+                fileItem.innerHTML = `
+                    ${index + 1}. ${file.name} (${(file.size/1024/1024).toFixed(1)} MB)
+                `;
+                fileItems.appendChild(fileItem);
+            });
+            
+            fileCount.textContent = currentFiles.length;
+            fileList.style.display = currentFiles.length > 0 ? 'block' : 'none';
+        }
+
+        function updateButtons() {
+            const hasFiles = currentFiles.length > 0;
+            document.getElementById('simpleBtn').disabled = !hasFiles || isProcessing;
+            document.getElementById('streamBtn').disabled = !hasFiles || isProcessing;
+        }
+
+        function clearFiles() {
+            currentFiles = [];
+            document.getElementById('fileInput').value = '';
+            updateFileList();
+            updateButtons();
+            showSuccess('Файлы очищены');
+        }
+
+        async function processFilesSimple() {
+            if (currentFiles.length === 0 || isProcessing) return;
+            
+            if (currentFiles.length > 5) {
+                showError('Для более чем 5 файлов используйте потоковую загрузку!');
+                return;
+            }
+            
+            await processWithMethod('simple');
+        }
+
+        async function startStreamingUpload() {
+            if (currentFiles.length === 0 || isProcessing) return;
+            
+            await processWithMethod('stream');
+        }
+
+        async function processWithMethod(method) {
+            isProcessing = true;
+            showLoading(true);
+            updateButtons();
+            
+            try {
+                if (method === 'simple') {
+                    await processSimple();
+                } else {
+                    await processStreaming();
+                }
+            } catch (err) {
+                console.error('Ошибка:', err);
+                showError(err.message);
+            } finally {
+                isProcessing = false;
+                showLoading(false);
+                updateButtons();
+            }
+        }
+
+        async function processSimple() {
+            const formData = new FormData();
+            
+            currentFiles.forEach(file => {
+                formData.append('files', file);
+            });
+            
+            formData.append('noise_level', document.getElementById('noiseLevel').value / 100);
+
+            const response = await fetch('/upload', { 
+                method: 'POST', 
+                body: formData 
+            });
+
+            await handleResponse(response);
+        }
+
+        async function processStreaming() {
+            const startResponse = await fetch('/start_upload', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    file_count: currentFiles.length,
+                    noise_level: document.getElementById('noiseLevel').value / 100
+                })
+            });
+            
+            const startData = await startResponse.json();
+            if (!startResponse.ok) throw new Error(startData.error);
+            
+            currentSessionId = startData.session_id;
+            console.log(`🚀 Начата потоковая сессия: ${currentSessionId}`);
+            
+            const CHUNK_SIZE = 3;
+            for (let i = 0; i < currentFiles.length; i += CHUNK_SIZE) {
+                const chunk = currentFiles.slice(i, i + CHUNK_SIZE);
+                const chunkFormData = new FormData();
+                
+                chunk.forEach(file => {
+                    chunkFormData.append('files', file);
+                });
+                
+                const chunkResponse = await fetch(`/upload_chunk/${currentSessionId}`, {
+                    method: 'POST',
+                    body: chunkFormData
+                });
+                
+                const chunkData = await chunkResponse.json();
+                if (!chunkResponse.ok) {
+                    console.error(`Ошибка в чанке ${i}:`, chunkData.error);
+                    continue;
+                }
+                
+                document.getElementById('chunkInfo').textContent = 
+                    `Обработан чанк: ${chunkData.successful_in_chunk}/${chunkData.processed_in_chunk} файлов`;
+                
+                await updateProgress();
+                
+                if (i + CHUNK_SIZE < currentFiles.length) {
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                }
+            }
+            
+            await getFinalResults();
+        }
+
+        async function updateProgress() {
+            if (!currentSessionId) return;
+            
+            try {
+                const progressResponse = await fetch(`/get_progress/${currentSessionId}`);
+                const progressData = await progressResponse.json();
+                
+                if (progressResponse.ok) {
+                    const percent = (progressData.processed / progressData.total) * 100;
+                    document.getElementById('progressFill').style.width = percent + '%';
+                    document.getElementById('progressText').textContent = 
+                        `Обработано: ${progressData.processed}/${progressData.total} файлов`;
+                }
+            } catch (err) {
+                console.error('Ошибка прогресса:', err);
+            }
+        }
+
+        async function getFinalResults() {
+            if (!currentSessionId) return;
+            
+            try {
+                const resultsResponse = await fetch(`/get_results/${currentSessionId}`);
+                await handleResponse(resultsResponse);
+            } catch (err) {
+                console.error('Ошибка результатов:', err);
+                throw err;
+            }
+        }
+
+        async function handleResponse(response) {
+            const contentType = response.headers.get('content-type');
+            if (!contentType || !contentType.includes('application/json')) {
+                const text = await response.text();
+                console.error('Сервер вернул не JSON:', text.substring(0, 500));
+                throw new Error(`Ошибка сервера: ${response.status}`);
+            }
+
+            const data = await response.json();
+            
+            if (!response.ok) {
+                throw new Error(data.error || `Ошибка: ${response.status}`);
+            }
+            
+            displayBatchResults(data);
+            showSuccess(`✅ Обработано ${data.summary.successful} из ${data.summary.total} файлов!`);
+        }
+
+        function displayBatchResults(data) {
+            const summaryContent = document.getElementById('summaryContent');
+            summaryContent.innerHTML = `
+                <p><strong>Всего файлов:</strong> ${data.summary.total}</p>
+                <p><strong>Успешно обработано:</strong> ${data.summary.successful}</p>
+                <p><strong>С ошибками:</strong> ${data.summary.failed}</p>
+                ${data.failed_files && data.failed_files.length > 0 ? `
+                    <p><strong>Файлы с ошибками:</strong></p>
+                    <ul>
+                        ${data.failed_files.map(f => `<li>${f.filename}: ${f.error}</li>`).join('')}
+                    </ul>
+                ` : ''}
+            `;
+            
+            // ПОКАЗЫВАЕМ КНОПКИ СКАЧИВАНИЯ
+            document.getElementById('downloadButtons').style.display = 'block';
+            document.getElementById('batchSummary').style.display = 'block';
+            
             const resultsGrid = document.getElementById('resultsGrid');
             resultsGrid.innerHTML = '';
+            
+            if (data.processed_files && data.processed_files.length > 0) {
+                data.processed_files.forEach((fileResult, index) => {
+                    const fileSection = document.createElement('div');
+                    fileSection.className = 'file-section';
+                    fileSection.innerHTML = `
+                        <h3>🎵 ${fileResult.filename} (${fileResult.duration ? fileResult.duration.toFixed(1) + 'сек' : ''})</h3>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px;">
+                            ${createAudioCard('Оригинал', 'original', fileResult, data.noise_reduction_level)}
+                            ${createAudioCard('Очищенный', 'denoised', fileResult, data.noise_reduction_level)}
+                            ${createAudioCard('Удаленный шум', 'residual', fileResult, data.noise_reduction_level)}
+                        </div>
+                    `;
+                    
+                    resultsGrid.appendChild(fileSection);
+                });
+            }
+            
+            document.getElementById('results').style.display = 'block';
+        }
 
-            const types = [
-                { title: 'Оригинал', key: 'original', desc: 'Исходный звук' },
-                { title: `Очищенный (${Math.round(data.noise_reduction_level * 100)}%)`, key: 'denoised', desc: 'После шумоподавления' },
-                { title: 'Удаленный шум', key: 'residual', desc: 'Что было удалено' }
-            ];
-
-            types.forEach(type => {
-                const card = document.createElement('div');
-                card.className = 'result-card';
-                
-                const spectrogram = data.spectrograms[type.key];
-                
-                card.innerHTML = `
-                    <h3>${type.title}</h3>
-                    <p>${type.desc}</p>
+        function createAudioCard(title, key, fileResult, noiseLevel) {
+            const spectrogram = fileResult.spectrograms && fileResult.spectrograms[key];
+            const displayTitle = key === 'denoised' ? `${title} (${Math.round(noiseLevel * 100)}%)` : title;
+            
+            return `
+                <div class="result-card">
+                    <h4>${displayTitle}</h4>
                     <div class="spectrogram-img">
                         ${spectrogram ? 
-                            `<img src="${spectrogram}" alt="Спектрограмма">` :
+                            `<img src="${spectrogram}" alt="${title}" style="max-width: 100%; height: auto;">` :
                             '<div>Спектрограмма не создана</div>'
                         }
                     </div>
-                    <audio controls class="audio-player">
-                        <source src="data:audio/wav;base64,${data.preview_audio[type.key]}" type="audio/wav">
-                    </audio>
+                    ${fileResult.preview_audio && fileResult.preview_audio[key] ? `
+                        <audio controls class="audio-player">
+                            <source src="data:audio/wav;base64,${fileResult.preview_audio[key]}" type="audio/wav">
+                        </audio>
+                    ` : ''}
                     <div>
-                        <a href="${data.files[`${type.key}_audio`]}" class="download-btn" download>Скачать аудио</a>
+                        ${fileResult.files && fileResult.files[`${key}_audio`] ? 
+                            `<a href="${fileResult.files[`${key}_audio`]}" class="download-btn" download>Скачать ${title}</a>` :
+                            ''
+                        }
                     </div>
-                `;
-                
-                resultsGrid.appendChild(card);
-            });
+                </div>
+            `;
+        }
 
-            document.getElementById('results').style.display = 'block';
+        // ФУНКЦИЯ СКАЧИВАНИЯ СПЕКТРОГРАММ
+        function downloadSpectrograms(type) {
+            if (!currentSessionId) {
+                showError('Нет активной сессии для скачивания');
+                return;
+            }
+            
+            const url = `/download_spectrograms/${currentSessionId}/${type}`;
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = '';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            showSuccess(`📥 Начато скачивание ${getSpectrogramTypeName(type)}`);
+        }
+
+        function getSpectrogramTypeName(type) {
+            const names = {
+                'original': 'исходных спектрограмм',
+                'denoised': 'обработанных спектрограмм', 
+                'residual': 'спектрограмм шумов'
+            };
+            return names[type] || 'спектрограмм';
         }
 
         function showLoading(show) {
             document.getElementById('loading').style.display = show ? 'block' : 'none';
-            document.getElementById('processBtn').disabled = show;
+            document.getElementById('simpleBtn').disabled = show;
+            document.getElementById('streamBtn').disabled = show;
         }
 
         function showError(msg) {
