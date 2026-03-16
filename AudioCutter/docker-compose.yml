@@ -1,0 +1,9 @@
+services:
+  audio_cutter:
+    build: .
+    container_name: audio_cutter
+    volumes:
+      - ./input_files:/app/input_files
+      - ./out_files:/app/out_files
+    stdin_open: true
+    tty: true
